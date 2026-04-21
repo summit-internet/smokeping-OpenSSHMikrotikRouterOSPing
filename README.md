@@ -61,6 +61,7 @@ I wanted a probe to connect to Mikrotik RouterOS devices via SSH. So I created t
 - Do Not Fragment flag
 - Source SSH Port (Standard or Non-Standard)
 - User defined openssh-client path (/usr/bin/ssh)
+- SSH Key Authentication (with fallback to ssh-agent / default identity files)
 - Configurable SSH connect timeout (fail fast when router is unreachable)
 - Configurable SSH session timeout
 - Configurable SSH StrictHostKeyChecking policy (`yes` / `accept-new` / `no`)
@@ -92,6 +93,66 @@ Multiplexing is the ability to send more than one signal over a single line or c
 - Set/Filter the allowed IPs either in the IP->Services or set up a Firewall rule to permit SSH connections per your security policy
   
   ![Service2](https://github.com/tonydm/smokeping-OpenSSHMikrotikRouterOSPing/blob/master/screenshots/winbox-services-settings2.png)
+
+### SSH Key Authentication
+
+The probe supports three ways to authenticate to each Mikrotik target, chosen per-target:
+
+1. **Password** — set `routerospass` (the legacy default).
+2. **SSH key file** — set `ssh_key_path` to the private key path. Leave `routerospass` unset.
+3. **ssh-agent / default identity files** — leave both `routerospass` and `ssh_key_path` unset. Net::OpenSSH invokes the system ssh client which picks up `SSH_AUTH_SOCK`, `~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, etc. — handy for containerised smokeping deployments that mount an agent socket.
+
+If none of the three are configured the connection fails at runtime with a Net::OpenSSH authentication error in the smokeping log.
+
+#### Generating a key and uploading it to the router
+
+Run these on the smokeping host, as root (or the user who will run smokeping):
+
+```
+# 1. Generate an unencrypted ed25519 key dedicated to smokeping
+ssh-keygen -t ed25519 -f /etc/smokeping/id_ed25519 -N '' -C smokeping-probe
+
+# 2. Lock down permissions (ssh refuses keys that are group/world-readable)
+chown smokeping:smokeping /etc/smokeping/id_ed25519 /etc/smokeping/id_ed25519.pub
+chmod 0600 /etc/smokeping/id_ed25519
+chmod 0644 /etc/smokeping/id_ed25519.pub
+
+# 3. Copy the public key to the router (one-time; will need the router password)
+scp /etc/smokeping/id_ed25519.pub smokeping@router.example.com:id_ed25519.pub
+```
+
+Then on the MikroTik router, as the admin or a user with `write` policy:
+
+```
+# 4. Associate the public key with the smokeping user account
+/user ssh-keys import public-key-file=id_ed25519.pub user=smokeping
+
+# 5. (Optional) Verify the key is registered
+/user ssh-keys print where user=smokeping
+
+# 6. (Optional) Remove the uploaded file now that it's imported
+/file remove id_ed25519.pub
+```
+
+Finally verify end-to-end from the smokeping host, still as root or the smokeping user:
+
+```
+sudo -u smokeping ssh -i /etc/smokeping/id_ed25519 smokeping@router.example.com
+```
+
+You should land on the `[smokeping@MikroTik] >` prompt without being asked for a password. Type `quit` to exit.
+
+Once that works, set `ssh_key_path = /etc/smokeping/id_ed25519` on the relevant smokeping target(s) and unset `routerospass`.
+
+> If the router password doesn't allow you to scp in step 3 (some hardened configurations disable password auth on the router ssh before a key is imported), upload `id_ed25519.pub` via Winbox Files instead, then run step 4 as normal.
+
+#### Using ssh-agent instead
+
+If smokeping runs in a container that already has `SSH_AUTH_SOCK` forwarded from the host (or some orchestrator injects it), leave both `routerospass` and `ssh_key_path` unset on the target. Net::OpenSSH will invoke ssh, which will try the agent first. Confirm it works with:
+
+```
+sudo -u smokeping ssh smokeping@router.example.com
+```
 
 ### Multiplexed SSH Connections
 
@@ -152,9 +213,10 @@ pings = 20
 # dscp_id = <id number> # Not used by default
 # rtable = <routing table name> # Not used by default
 # do_not_fragment = false # Not used by default
-routerospass = <userpass>
+routerospass = <userpass> # Optional.  Omit if using ssh_key_path or ssh-agent.
 routerosuser = <username>
 # ssh_binary_path = /usr/bin/ssh
+# ssh_key_path = /etc/smokeping/id_ed25519 # Optional.  If set, use key auth instead of routerospass.  See SSH Key Authentication section above.
 # ssh_connect_timeout = 10 # Default.  Bounds TCP/SSH handshake; lower this to fail faster on unreachable routers.
 # ssh_timeout = 60 # Default.  Bounds the overall ssh session including the ping command.
 # ssh_strict_host_key_checking = accept-new # Default.  Other values: 'no' (trust any key), 'yes' (require pre-seeded known_hosts)
@@ -207,15 +269,21 @@ debug = true
 debug_logfile = /tmp/smokeping_remote_router1.log
 
 ++ remote_router2
+# Key-auth example: this target overrides the probe-level password by setting ssh_key_path
+# and leaving routerospass unset.  See the "SSH Key Authentication" section above for setup.
 title = Remote Router2
 source = <remoterouter2_WAN_IP_Address>
 psource = <some_other_IP_address_on_remote_router>
 host = <IP_of_interest>
 rtable = <name_of_routing_table_other_than_main>
 ssh_port = 29437
+ssh_key_path = /etc/smokeping/id_ed25519
 multiplex_ssh = false # Don't use multiplexed ssh connections - but why would you not want to
 
 ++ remote_router3
+# ssh-agent example: with both routerospass and ssh_key_path unset (and not inherited from
+# the probe), Net::OpenSSH falls through to SSH_AUTH_SOCK / ~/.ssh/id_* identity files.
+# Useful when the smokeping process runs in a container with an agent socket mounted.
 title = Remote Router3
 source = <remoterouter3_WAN_IP_Address>
 host = <IP_of_interest>
@@ -235,11 +303,6 @@ multiplex_control_persist_time = 20 # Override to use 20 minutes
 ### Bugs
 
 - None reported
-
-### TODO
-
-- Add support 
-  - SSH Key Authentication
 
 ### License
 

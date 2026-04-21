@@ -47,8 +47,37 @@ DOC
   notes => <<DOC,
 ${e}head2 Mikrotik RouterOS configuration
 
-The Mikrotik RouterOS device should have a username/password configured, and
-the ssh server must not be disabled.  You can use a non standard port.
+The Mikrotik RouterOS device should have a username configured, and the
+ssh server must not be disabled.  You can use a non standard port.  The
+user needs either a password set or an ssh public key associated with it
+via /user ssh-keys import on the router.
+
+${e}head2 Authentication
+
+The probe supports three ways to authenticate to the Mikrotik RouterOS
+device.  Pick one per target.
+
+=over
+
+=item * Password: set routerospass.  Leave ssh_key_path unset.  This is
+the legacy default.
+
+=item * SSH key file: set ssh_key_path to the path of a private key
+file readable by the user running smokeping.  Leave routerospass unset.
+Install the matching public key on the router with /user ssh-keys
+import public-key-file=<file> user=<routerosuser>.  The README has a
+step-by-step walk-through.
+
+=item * ssh-agent or system default identity: leave both routerospass
+and ssh_key_path unset.  Net::OpenSSH will invoke the system ssh client
+which picks up SSH_AUTH_SOCK, ~/.ssh/id_ed25519, ~/.ssh/id_rsa etc as
+it would for an interactive login.  This is useful for containerised
+smokeping deployments that mount an agent socket.
+
+=back
+
+If none of the three are configured the connection will fail at runtime
+with a Net::OpenSSH authentication error logged to the smokeping log.
 
 By default (ssh_strict_host_key_checking=accept-new) the probe will add the
 router's host key to the smokeping user's known_hosts file automatically on
@@ -138,6 +167,7 @@ sub pingone ($$){
   my $ttl = $target->{vars}{ttl};
   my $do_not_fragment = $target->{vars}{do_not_fragment};
   my $ssh_cmd = $target->{vars}{ssh_binary_path};
+  my $ssh_key_path = $target->{vars}{ssh_key_path};
   my $ssh_timeout = $target->{vars}{ssh_timeout};
   my $ssh_connect_timeout = $target->{vars}{ssh_connect_timeout};
   my $ssh_strict_host_key_checking = $target->{vars}{ssh_strict_host_key_checking};
@@ -178,6 +208,7 @@ sub pingone ($$){
   my %opts = (
     "user" => $login ? $login : (),
     "password" => $password ? $password : (),
+    "key_path" => $ssh_key_path ? $ssh_key_path : (),
     "port" => $port,
     "timeout" => $ssh_timeout,
     "kill_ssh_on_timeout" => 1,
@@ -412,7 +443,7 @@ sub targetvars {
 
   # Define the parameters/options
   my $params = {
-    _mandatory => [ 'routerosuser', 'routerospass', 'source' ],
+    _mandatory => [ 'routerosuser', 'source' ],
     source => {
       _doc => <<DOC,
 The (manditory) source option specifies the Mikrotik RouterOS device that is going to run
@@ -444,7 +475,10 @@ DOC
     },
     routerospass => {
       _doc => <<DOC,
-The (manditory) routerospass option allows you to specify the SSH login password.
+The (optional) routerospass option specifies the SSH login password.
+Required unless ssh_key_path is set, or ssh-agent / a default identity
+file (e.g. ~/.ssh/id_ed25519) is configured for the user running
+smokeping.  See the Authentication section in the notes.
 DOC
       _example => 'password',
     },
@@ -537,6 +571,18 @@ necessary to define the path to the binary if it is not found in the \$PATH.
 DOC
       _default => "/usr/bin/ssh",
       _example => "/usr/bin/ssh",
+    },
+    ssh_key_path => {
+      _doc => <<DOC,
+The (optional) ssh_key_path option specifies the path to a private key
+file used to authenticate to the Mikrotik RouterOS device.  When set the
+ssh client is invoked with -i <path>, bypassing routerospass.  The key
+must be readable only by the user running smokeping (typically mode
+0600) or the ssh client will refuse to use it.  See the Authentication
+section in the notes for the three supported modes (password, key file,
+ssh-agent / default identity files).
+DOC
+      _example => '/etc/smokeping/id_ed25519',
     },
     ssh_connect_timeout => {
       _doc => <<DOC,

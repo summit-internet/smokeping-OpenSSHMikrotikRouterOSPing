@@ -28,11 +28,12 @@ SYNOPSIS
      multiplex_ssh = false
      pings = 20
      psource = 192.168.2.129
-     routerospass = password # mandatory
+     routerospass = password # optional - see Authentication notes
      routerosuser = user # mandatory
      rtable = secondary_route
      source = 192.168.2.1 # mandatory
      ssh_binary_path = /usr/bin/ssh
+     ssh_key_path = /etc/smokeping/id_ed25519
      ssh_connect_timeout = 10
      ssh_port = 22431
      ssh_strict_host_key_checking = accept-new
@@ -60,11 +61,12 @@ SYNOPSIS
      multiplex_ssh = false
      pings = 20
      psource = 192.168.2.129
-     routerospass = password # mandatory
+     routerospass = password # optional - see Authentication notes
      routerosuser = user # mandatory
      rtable = secondary_route
      source = 192.168.2.1 # mandatory
      ssh_binary_path = /usr/bin/ssh
+     ssh_key_path = /etc/smokeping/id_ed25519
      ssh_connect_timeout = 10
      ssh_port = 22431
      ssh_strict_host_key_checking = accept-new
@@ -224,12 +226,13 @@ VARIABLES
         Example value: 192.168.2.129
 
     routerospass
-        The (manditory) routerospass option allows you to specify the SSH
-        login password.
+        The (optional) routerospass option specifies the SSH login
+        password. Required unless ssh_key_path is set, or ssh-agent / a
+        default identity file (e.g. ~/.ssh/id_ed25519) is configured for
+        the user running smokeping. See the Authentication section in the
+        notes.
 
         Example value: password
-
-        This setting is mandatory.
 
     routerosuser
         The (manditory) routerosuser option allows you to specify the SSH
@@ -264,6 +267,18 @@ VARIABLES
         Example value: /usr/bin/ssh
 
         Default value: /usr/bin/ssh
+
+    ssh_key_path
+        The (optional) ssh_key_path option specifies the path to a private
+        key file used to authenticate to the Mikrotik RouterOS device. When
+        set the ssh client is invoked with -i <path>, bypassing
+        routerospass. The key must be readable only by the user running
+        smokeping (typically mode 0600) or the ssh client will refuse to
+        use it. See the Authentication section in the notes for the three
+        supported modes (password, key file, ssh-agent / default identity
+        files).
+
+        Example value: /etc/smokeping/id_ed25519
 
     ssh_connect_timeout
         The (optional) ssh_connect_timeout option bounds the TCP/SSH
@@ -326,9 +341,33 @@ AUTHORS
 
 NOTES
   Mikrotik RouterOS configuration
-    The Mikrotik RouterOS device should have a username/password configured,
-    and the ssh server must not be disabled. You can use a non standard
-    port.
+    The Mikrotik RouterOS device should have a username configured, and the
+    ssh server must not be disabled. You can use a non standard port. The
+    user needs either a password set or an ssh public key associated with
+    it via /user ssh-keys import on the router.
+
+  Authentication
+    The probe supports three ways to authenticate to the Mikrotik RouterOS
+    device. Pick one per target.
+
+    *   Password: set routerospass. Leave ssh_key_path unset. This is the
+        legacy default.
+
+    *   SSH key file: set ssh_key_path to the path of a private key file
+        readable by the user running smokeping. Leave routerospass unset.
+        Install the matching public key on the router with /user ssh-keys
+        import public-key-file=<file> user=<routerosuser>. The README has
+        a step-by-step walk-through.
+
+    *   ssh-agent or system default identity: leave both routerospass and
+        ssh_key_path unset. Net::OpenSSH will invoke the system ssh client
+        which picks up SSH_AUTH_SOCK, ~/.ssh/id_ed25519, ~/.ssh/id_rsa
+        etc as it would for an interactive login. This is useful for
+        containerised smokeping deployments that mount an agent socket.
+
+    If none of the three are configured the connection will fail at
+    runtime with a Net::OpenSSH authentication error logged to the
+    smokeping log.
 
     By default (ssh_strict_host_key_checking=accept-new) the probe will add
     the router's host key to the smokeping user's known_hosts file

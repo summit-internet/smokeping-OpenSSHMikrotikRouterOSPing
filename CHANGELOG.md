@@ -38,3 +38,14 @@
   had been introduced in commit dce8918 and prevented the .pm from
   loading under Perl. This fix is a side-effect of the master_opts
   restructure.
+### Version 1.4.6
+- Added ssh_key_path target var for SSH key-based authentication. When
+  set, the ssh client is invoked with -i <path> and routerospass is
+  bypassed.
+- routerospass is now optional (removed from the _mandatory list).
+  Targets may authenticate via routerospass, ssh_key_path, or by leaving
+  both unset and relying on ssh-agent / default identity files (useful
+  for containerised smokeping deployments that mount SSH_AUTH_SOCK).
+- README documents the full MikroTik-side setup (ssh-keygen, scp, /user
+  ssh-keys import) and shows all three auth modes in the target
+  examples.
