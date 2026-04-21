@@ -158,7 +158,7 @@ sudo -u smokeping ssh smokeping@router.example.com
 
 There are some requirements for this feature to work.  OpenSSH requires that the directory and it's parents, where the Master Control Socket File is created, must be writable only by the current effective user or root, otherwise the connection will be aborted to avoid insecure operation.  By default ~/.libnet-openssh-perl is used.
 
-This probe will attempt to determine the $HOME directory of the user running/executing Smokeping, usually "smokeping" or "root".  In some cases, if using Docker or other container platform.  For example, the user could be "abc" in the case of using s6-supervise.  You can override this behaviour and specify the directory where the Master Control Socket File is created by setting the multiplex_socket_file_path option in the Probes config file.  You must ensure that the path meets the requirements as previously stated and that the permission masks be 0755 or more restrictive so that no other user can write to the dir/file.
+This probe will attempt to determine the $HOME directory of the user running/executing Smokeping, usually "smokeping" or "root".  In some cases, if using Docker or other container platform.  For example, the user could be "abc" in the case of using s6-supervise.  You can override this behaviour and specify the directory where the Master Control Socket File is created by setting the multiplex_control_socket_path option in the Probes config file.  You must ensure that the path meets the requirements as previously stated and that the permission masks be 0755 or more restrictive so that no other user can write to the dir/file.
 
   - The error you will see in the smokeping.log (smokeping debug and logging enabled) if you have defined your own socket file path w/o properly setting up permissions:
 
@@ -222,7 +222,7 @@ routerosuser = <username>
 # ssh_strict_host_key_checking = accept-new # Default.  Other values: 'no' (trust any key), 'yes' (require pre-seeded known_hosts)
 multiplex_ssh = true # Default
 # multiplex_control_persist_time = 10 # Default is 10 min.  A value of 0 will leave socket file indefinitely
-# multiplex_control_file_path = ~/.libnet-openssh-perl # Default
+# multiplex_control_socket_path = ~/.libnet-openssh-perl # Default
 debug = false # Default
 debug_logfile = /tmp/smokeping_openssh_mtik.log
 ```
@@ -246,7 +246,7 @@ host = speedtest-nyc1.digitalocean.com
 # psource - uses parent defined
 rtable = secondary_wan
 # multiplex_ssh = true # Default
-multiplex_control_file_path = /tmp/smokeping_ssh_sockets
+multiplex_control_socket_path = /tmp/smokeping_ssh_sockets
 multiplex_control_persist_time = 0 # Indefinitely
 debug = true
 
@@ -293,7 +293,7 @@ dscp_id = 5
 do_not_fragment = true
 ssh_port = 29437
 # multiplex_ssh = true # Default behaviour
-multiplex_control_file_path = /tmp/smokeping_ssh_sockets # Override default ~/.libnet-openssh-perl
+multiplex_control_socket_path = /tmp/smokeping_ssh_sockets # Override default ~/.libnet-openssh-perl
 multiplex_control_persist_time = 20 # Override to use 20 minutes
 ```
 
