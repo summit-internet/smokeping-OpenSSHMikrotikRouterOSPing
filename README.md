@@ -61,6 +61,9 @@ I wanted a probe to connect to Mikrotik RouterOS devices via SSH. So I created t
 - Do Not Fragment flag
 - Source SSH Port (Standard or Non-Standard)
 - User defined openssh-client path (/usr/bin/ssh)
+- Configurable SSH connect timeout (fail fast when router is unreachable)
+- Configurable SSH session timeout
+- Configurable SSH StrictHostKeyChecking policy (`yes` / `accept-new` / `no`)
 - Multiplexed SSH Connections
   - User defined SSH Control Socket File Path
   - User defined SSH Control Socket Persist Timeout
@@ -152,6 +155,9 @@ pings = 20
 routerospass = <userpass>
 routerosuser = <username>
 # ssh_binary_path = /usr/bin/ssh
+# ssh_connect_timeout = 10 # Default.  Bounds TCP/SSH handshake; lower this to fail faster on unreachable routers.
+# ssh_timeout = 60 # Default.  Bounds the overall ssh session including the ping command.
+# ssh_strict_host_key_checking = accept-new # Default.  Other values: 'no' (trust any key), 'yes' (require pre-seeded known_hosts)
 multiplex_ssh = true # Default
 # multiplex_control_persist_time = 10 # Default is 10 min.  A value of 0 will leave socket file indefinitely
 # multiplex_control_file_path = ~/.libnet-openssh-perl # Default
@@ -196,6 +202,7 @@ source = <remoterouter1_WAN_IP_Address>
 # psource - No default defined, will use source address to source pings
 host = <IP_of_interest>
 ssh_port = 22431
+ssh_connect_timeout = 5 # Shorter than default 10s; fail fast if this remote router is down so the step doesn't blow out
 debug = true
 debug_logfile = /tmp/smokeping_remote_router1.log
 

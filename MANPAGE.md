@@ -33,7 +33,10 @@ SYNOPSIS
      rtable = secondary_route
      source = 192.168.2.1 # mandatory
      ssh_binary_path = /usr/bin/ssh
+     ssh_connect_timeout = 10
      ssh_port = 22431
+     ssh_strict_host_key_checking = accept-new
+     ssh_timeout = 60
      ttl = 20
 
      # [...]
@@ -62,7 +65,10 @@ SYNOPSIS
      rtable = secondary_route
      source = 192.168.2.1 # mandatory
      ssh_binary_path = /usr/bin/ssh
+     ssh_connect_timeout = 10
      ssh_port = 22431
+     ssh_strict_host_key_checking = accept-new
+     ssh_timeout = 60
      ttl = 20
 
 DESCRIPTION
@@ -259,6 +265,17 @@ VARIABLES
 
         Default value: /usr/bin/ssh
 
+    ssh_connect_timeout
+        The (optional) ssh_connect_timeout option bounds the TCP/SSH
+        handshake in seconds via OpenSSH's ConnectTimeout option. This is
+        the main knob for failing fast when the Mikrotik RouterOS device is
+        unreachable, so probe cycles do not blow out waiting the full
+        ssh_timeout. Must be less than ssh_timeout.
+
+        Example value: 10
+
+        Default value: 10
+
     ssh_port
         The (optional) ssh_port option lets you specify a non standard SSH
         port.
@@ -266,6 +283,30 @@ VARIABLES
         Example value: 22431
 
         Default value: 22
+
+    ssh_strict_host_key_checking
+        The (optional) ssh_strict_host_key_checking option controls
+        OpenSSH's StrictHostKeyChecking policy for the ssh connection to
+        the Mikrotik RouterOS device. Valid values: 'accept-new' (default
+        - auto-adds new host keys to known_hosts on first connect, rejects
+        changed keys), 'no' (silently trust any host key), 'yes' (require
+        key to already be in known_hosts, fail otherwise).
+
+        Example value: accept-new
+
+        Default value: accept-new
+
+    ssh_timeout
+        The (optional) ssh_timeout option specifies, in seconds, the
+        Net::OpenSSH master-channel timeout. This bounds the overall
+        duration of the ssh session including the running ping command, so
+        it must be larger than the ping command duration (roughly pings *
+        1s + headroom). For short TCP handshake timeouts see
+        ssh_connect_timeout.
+
+        Example value: 60
+
+        Default value: 60
 
     ttl The (optional) ttl option lets you specify the Time to Live value
         for the pings sent. Default is 64.
@@ -289,11 +330,15 @@ NOTES
     and the ssh server must not be disabled. You can use a non standard
     port.
 
-    Make sure to connect to the remote host once from the command line as
-    the user who is running smokeping. On the first connect ssh will ask to
-    add the new host to its known_hosts file. This will not happen
-    automatically so the script will fail to login until the ssh key of your
-    Mikrotik RouterOS device is in the known_hosts file.
+    By default (ssh_strict_host_key_checking=accept-new) the probe will add
+    the router's host key to the smokeping user's known_hosts file
+    automatically on first connect. If the key later changes (router
+    rebuild, replacement, or a man-in-the-middle) the connection will fail
+    until the stale entry is removed from known_hosts, which is the
+    intended behaviour for a monitoring tool. Set
+    ssh_strict_host_key_checking=no to trust any key silently, or
+    ssh_strict_host_key_checking=yes to require the key be pre-populated in
+    known_hosts before the probe will connect.
 
   Requirements
     This module requires the Net::OpenSSH and IO::Pty perl modules

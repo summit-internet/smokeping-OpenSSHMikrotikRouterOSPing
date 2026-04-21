@@ -50,11 +50,14 @@ ${e}head2 Mikrotik RouterOS configuration
 The Mikrotik RouterOS device should have a username/password configured, and
 the ssh server must not be disabled.  You can use a non standard port.
 
-Make sure to connect to the remote host once from the command line as the
-user who is running smokeping. On the first connect ssh will ask to add the
-new host to its known_hosts file. This will not happen automatically so the
-script will fail to login until the ssh key of your Mikrotik RouterOS device
-is in the known_hosts file.
+By default (ssh_strict_host_key_checking=accept-new) the probe will add the
+router's host key to the smokeping user's known_hosts file automatically on
+first connect. If the key later changes (router rebuild, replacement, or a
+man-in-the-middle) the connection will fail until the stale entry is
+removed from known_hosts, which is the intended behaviour for a monitoring
+tool. Set ssh_strict_host_key_checking=no to trust any key silently, or
+ssh_strict_host_key_checking=yes to require the key be pre-populated in
+known_hosts before the probe will connect.
 
 ${e}head2 Requirements
 
@@ -135,6 +138,9 @@ sub pingone ($$){
   my $ttl = $target->{vars}{ttl};
   my $do_not_fragment = $target->{vars}{do_not_fragment};
   my $ssh_cmd = $target->{vars}{ssh_binary_path};
+  my $ssh_timeout = $target->{vars}{ssh_timeout};
+  my $ssh_connect_timeout = $target->{vars}{ssh_connect_timeout};
+  my $ssh_strict_host_key_checking = $target->{vars}{ssh_strict_host_key_checking};
   my $multiplex_ssh = $target->{vars}{multiplex_ssh};
   $multiplex_control_socket_path = $target->{vars}{multiplex_control_socket_path};
   my $multiplex_control_persist_time = $target->{vars}{multiplex_control_persist_time};
@@ -173,10 +179,23 @@ sub pingone ($$){
     "user" => $login ? $login : (),
     "password" => $password ? $password : (),
     "port" => $port,
-    "timeout" => 60,
+    "timeout" => $ssh_timeout,
+    "kill_ssh_on_timeout" => 1,
     "strict_mode" => 0,
     "ssh_cmd" => $ssh_cmd
   );
+
+  # Base master_opts applied whether or not multiplexing is enabled.
+  # -oConnectTimeout bounds the TCP handshake so an unreachable router fails
+  # fast instead of waiting the full ssh_timeout. -oStrictHostKeyChecking
+  # defaults to accept-new so new routers auto-add on first connect but a
+  # changed key raises a visible failure in smokeping.
+  my @master_opts = (
+    "-oStrictHostKeyChecking=$ssh_strict_host_key_checking",
+    "-oConnectTimeout=$ssh_connect_timeout",
+  );
+  push @master_opts, "-vvv" if $debug_ssh;
+  $opts{'master_opts'} = \@master_opts;
 
   # If multiplex ssh is enabled
   if ( $multiplex_ssh ){
@@ -230,17 +249,12 @@ sub pingone ($$){
         DEBUG("$debug_key: Master Control Socket file: $master_control_socket_path_file does not exist!  Creating new socket file.\n");
       }
 
-      my @master_opts = (
-        "-oStrictHostKeyChecking=no",
-        "-oControlPersist=$multiplex_control_persist_time",
-      );
-      push @master_opts, "-vvv" if $debug_ssh;
+      # Add multiplex-specific options to the base master_opts list
+      push @master_opts, "-oControlPersist=$multiplex_control_persist_time";
 
       # Append options hash to create a multiplex control socket
       $opts{'ctl_dir'} = $master_control_socket_dir;
       $opts{'ctl_path'} = $master_control_socket_path_file;
-      $opts{'master_opts'} = \@master_opts;
-    }
     }
   } else {
     # $self->do_log("Not using OpenSSH ControlMaster Multiplex connections!\n");
@@ -523,6 +537,61 @@ necessary to define the path to the binary if it is not found in the \$PATH.
 DOC
       _default => "/usr/bin/ssh",
       _example => "/usr/bin/ssh",
+    },
+    ssh_connect_timeout => {
+      _doc => <<DOC,
+The (optional) ssh_connect_timeout option bounds the TCP/SSH handshake in
+seconds via OpenSSH's ConnectTimeout option.  This is the main knob for
+failing fast when the Mikrotik RouterOS device is unreachable, so probe
+cycles do not blow out waiting the full ssh_timeout.  Must be less than
+ssh_timeout.
+DOC
+      _default => 10,
+      _re => '\d+',
+      _sub => sub {
+        my $val = shift;
+        return "ERROR: ssh_connect_timeout value of $val is invalid.  Must be >= 1 and <= 300"
+          unless $val >= 1 and $val <= 300;
+        return undef;
+      },
+      _example => 10,
+    },
+    ssh_timeout => {
+      _doc => <<DOC,
+The (optional) ssh_timeout option specifies, in seconds, the Net::OpenSSH
+master-channel timeout.  This bounds the overall duration of the ssh
+session including the running ping command, so it must be larger than the
+ping command duration (roughly pings * 1s + headroom).  For short TCP
+handshake timeouts see ssh_connect_timeout.
+DOC
+      _default => 60,
+      _re => '\d+',
+      _sub => sub {
+        my $val = shift;
+        return "ERROR: ssh_timeout value of $val is invalid.  Must be >= 1 and <= 3600"
+          unless $val >= 1 and $val <= 3600;
+        return undef;
+      },
+      _example => 60,
+    },
+    ssh_strict_host_key_checking => {
+      _doc => <<DOC,
+The (optional) ssh_strict_host_key_checking option controls OpenSSH's
+StrictHostKeyChecking policy for the ssh connection to the Mikrotik
+RouterOS device.  Valid values: 'accept-new' (default - auto-adds new
+host keys to known_hosts on first connect, rejects changed keys), 'no'
+(silently trust any host key), 'yes' (require key to already be in
+known_hosts, fail otherwise).
+DOC
+      _default => 'accept-new',
+      _re => '(yes|accept-new|no)',
+      _sub => sub {
+        my $val = shift;
+        return "ERROR: ssh_strict_host_key_checking value of $val is invalid.  Must be yes, accept-new, or no"
+          unless $val eq 'yes' or $val eq 'accept-new' or $val eq 'no';
+        return undef;
+      },
+      _example => 'accept-new',
     },
     multiplex_ssh => {
       _doc => <<DOC,

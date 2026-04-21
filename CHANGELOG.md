@@ -21,3 +21,20 @@
   pings. The time regex is now anchored to end-of-line so only replies with
   an empty STATUS column are recorded; anything else is treated as a dropped
   packet, matching MikroTik's own packet-loss accounting.
+### Version 1.4.5
+- Added ssh_connect_timeout target var (default 10s) mapped to OpenSSH's
+  -oConnectTimeout. Unreachable routers now fail within a few seconds
+  instead of blocking the probe for the full session timeout.
+- Added ssh_timeout target var (default 60s) exposing the Net::OpenSSH
+  master-channel timeout that was previously hardcoded.
+- Added ssh_strict_host_key_checking target var (default accept-new)
+  replacing the previous hardcoded StrictHostKeyChecking=no behaviour
+  that only applied in the multiplex branch. The new default auto-adds
+  host keys on first connect but fails loud on key changes. Applied
+  consistently whether multiplexing is enabled or not.
+- Net::OpenSSH now invoked with kill_ssh_on_timeout=1 so timed-out ssh
+  subprocesses are cleaned up rather than lingering.
+- Removed a stray closing brace in the multiplex-new-master branch that
+  had been introduced in commit dce8918 and prevented the .pm from
+  loading under Perl. This fix is a side-effect of the master_opts
+  restructure.
