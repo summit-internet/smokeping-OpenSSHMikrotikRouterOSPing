@@ -63,3 +63,25 @@
      key_path and password in the same call.  Now ssh_key_path takes
      precedence over routerospass so targets can flip individual
      entries to key auth without unsetting the probe-level default.
+### Version 1.4.8
+- debug=true output now starts with a one-line cycle-start summary
+  (host, dest, user, auth method, multiplex, timeouts, strict-host-key
+  policy) and ends with a cycle-done summary including phase timings
+  (connect / command / parse / total) and the parsed sample count.
+  Makes "why is this probe slow?" answerable without enabling
+  debug_ssh.
+- debug=true now logs the full composed ssh invocation (ssh_binary_path
+  + master_opts + -p port + user@host + quoted ping command).  Copy-
+  paste this as the smokeping user to reproduce connection failures
+  manually.
+- The RouterOS "sent=N received=N packet-loss=N%" footer line is no
+  longer silently discarded.  debug=true now logs it and cross-checks
+  the router's received count against the parser's sample count,
+  emitting a "WARN parser drift" line on mismatch.  Surfaces parser
+  regressions against new RouterOS output formats.
+- Documentation (POD, MANPAGE.md, README.md) now carries a prominent
+  security warning that debug_logfile contains routerospass in
+  plaintext (via the existing Net::OpenSSH options Dumper dump) and
+  the on-disk path of ssh_key_path.  If you have previously run with
+  debug=true, rotate or redact any historical debug_logfile files
+  before sharing them externally.

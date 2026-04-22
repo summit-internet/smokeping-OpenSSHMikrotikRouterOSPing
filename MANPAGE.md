@@ -134,7 +134,19 @@ VARIABLES
 
     debug
         The (optional) debug option lets you configure probe or target
-        specific debugging.
+        specific debugging. When enabled the log includes a cycle-start
+        configuration snapshot, the composed ssh command, phase timings
+        (connect/command/parse), and the RouterOS packet-loss summary
+        cross-checked against the parsed samples.
+
+        Security warning: with debug enabled the log also contains a
+        Data::Dumper dump of the Net::OpenSSH options hash, which
+        includes routerospass in plaintext when password auth is in use,
+        and the full on-disk path of ssh_key_path when key auth is in
+        use. Ensure debug_logfile lives on a filesystem readable only by
+        the smokeping user, and redact the file before sharing it
+        externally (support tickets, public issue trackers, pastebins,
+        etc.).
 
         Example value: true
 
@@ -142,7 +154,13 @@ VARIABLES
 
     debug_logfile
         The (optional) debug_logfile option lets you specify the debug
-        logifile
+        logifile.
+
+        With debug=true this file contains sensitive material including
+        the target's routerospass (when password auth is used) and the
+        on-disk path of ssh_key_path. Treat it as secret: lock it down
+        with filesystem permissions readable only by the smokeping user,
+        and rotate/redact it before sharing externally.
 
         Example value: /tmp/my_debug.log or /tmp/smokeping_target1.log
 
@@ -231,6 +249,10 @@ VARIABLES
         default identity file (e.g. ~/.ssh/id_ed25519) is configured for
         the user running smokeping. See the Authentication section in the
         notes.
+
+        Note: when debug=true the value of routerospass is written to
+        debug_logfile in plaintext as part of the Net::OpenSSH options
+        dump. See the debug option for details and mitigation.
 
         Example value: password
 

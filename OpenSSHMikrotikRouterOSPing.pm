@@ -19,6 +19,7 @@ use strict;
 use base qw(Smokeping::probes::basefork);
 use Net::OpenSSH;
 use Carp;
+use Time::HiRes qw(time);
 
 # Global VARs for Debugging & Multiplexing SSH Connections
 my $debug;
@@ -132,6 +133,27 @@ sub gen_debug_key(){
   return $str;
 }
 
+# Render a copy-pasteable approximation of the ssh invocation that
+# Net::OpenSSH will execute.  Useful for reproducing failures manually.
+# Does not include password auth details: Net::OpenSSH feeds the password
+# via a pty, not the command line, so the rendered command won't include
+# it.  key_path IS rendered (as -i <path>) because Net::OpenSSH translates
+# the key_path option into an -i flag on the underlying ssh invocation.
+sub render_ssh_command {
+  my ($ssh_cmd, $master_opts, $port, $user, $host, $key_path, $command) = @_;
+  my @parts = ($ssh_cmd, @$master_opts);
+  push @parts, "-i", $key_path if $key_path;
+  push @parts, "-p", $port if $port;
+  push @parts, ($user ? "$user\@$host" : $host);
+  # $command ends with "\n" (required by $ssh->capture for RouterOS CLI
+  # line termination) and may carry other trailing whitespace.  Strip it
+  # before wrapping in single quotes so the closing quote stays on the
+  # same log line.
+  (my $clean_command = $command) =~ s/\s+\z//;
+  push @parts, "'" . $clean_command . "'";
+  return join(" ", @parts);
+}
+
 # Check for existing multiplex configuration
 # in know locations
 sub check_for_multiplex_config($) {
@@ -189,6 +211,10 @@ sub pingone ($$){
 
   # If Debugging enabled
   $debug_key = gen_debug_key;
+  my $t_cycle_start = time();
+  my $auth_method = $ssh_key_path ? "key($ssh_key_path)"
+                  : $password     ? "password"
+                  :                 "agent/default";
   if ( $debug ) {
     use Data::Dumper;
 
@@ -203,7 +229,13 @@ sub pingone ($$){
         level => $DEBUG,
       }
     );
-    DEBUG("$debug_key: Debugging enabled...\n");
+    DEBUG(sprintf(
+      "%s: cycle start: host=%s dest=%s user=%s auth=%s multiplex=%s " .
+      "strict_host_key=%s connect_timeout=%ds timeout=%ds",
+      $debug_key, $host, $dest, $login, $auth_method,
+      ($multiplex_ssh ? "on" : "off"),
+      $ssh_strict_host_key_checking, $ssh_connect_timeout, $ssh_timeout,
+    ));
   }
 
   # Define the base SSH connection options to pass to the Net::OpenSSH->new() connection method.
@@ -272,7 +304,7 @@ sub pingone ($$){
       `chmod -R 0744 $master_control_socket_dir`;
 
       if ( $debug ) {
-        DEBUG("$debug_key: Multiplex control socket file path created and premissions set!");
+        DEBUG("$debug_key: Multiplex control socket file path created and permissions set!");
       }
     }
 
@@ -315,9 +347,11 @@ sub pingone ($$){
   }
 
   # Connect to source host
+  my $t_conn_start = time();
   my $ssh = Net::OpenSSH->new(
     $host, %opts
   );
+  my $t_conn_end = time();
 
   if ( $debug_ssh ) {
     DEBUG("SSH ERROR: " . $ssh->error );
@@ -366,14 +400,20 @@ sub pingone ($$){
 
   $ping_command .= "\n";
 
-  # Debug - Show ping command
+  # Debug - Show ping command + the full composed ssh invocation it will be sent through
   if ( $debug ) {
     DEBUG("$debug_key: $ping_command");
+    my $rendered = render_ssh_command(
+      $ssh_cmd, \@master_opts, $port, $login, $host, $ssh_key_path, $ping_command
+    );
+    DEBUG("$debug_key: ssh command: $rendered");
   }
 
   # Execute the ping command on the source/host and capture the response
   my @output = ();
+  my $t_cmd_start = time();
   @output = $ssh->capture($ping_command);
+  my $t_cmd_end = time();
 
   if ($ssh->error) {
     $self->do_log( "OpenSSHMikrotikRouterOSPing running commands on $host: ".$ssh->error );
@@ -388,18 +428,28 @@ sub pingone ($$){
 
   # Process the ping response
   my @times = ();
+  my $router_summary;
+  my $t_parse_start = time();
 
-  # Parse the ping latency values
+  # Parse the ping latency values.  The RouterOS summary footer "sent=N
+  # received=N packet-loss=N%" is captured separately so we can log it and
+  # cross-check the parser against the router's own accounting.  The
+  # min/avg/max-rtt footer line is still skipped to avoid accidentally
+  # matching the embedded rtt values with the sample-line regex.
   while (@output) {
     my $outputline = shift @output;
     chomp($outputline);
-    next if ($outputline =~ m/(sent|recieved|packet\-loss|min\-rtt|avg\-rtt|max\-rtt)/);
+    if ($outputline =~ /sent=(\d+)\s+received=(\d+)\s+packet-loss=(\d+)%/) {
+      $router_summary = { sent => $1, received => $2, loss => $3, raw => $outputline };
+      next;
+    }
+    next if ($outputline =~ m/(min\-rtt|avg\-rtt|max\-rtt)/);
     $outputline =~ /((\d+)ms(\d+)us|(\d+)ms|(\d+)us)\s*$/ && push(@times,($2?$2:"")+($4?$4:"")+($3?$3/1000:"")+($5?$5/1000:""));
   }
 
   # Convert the ping times values to RRD format
   @times = map {sprintf "%.10e", $_ / $self->{pingfactor}} sort {$a <=> $b} @times;
-  
+
   # Ensure the number of pings returned in @tumes are equal to the
   # configured number of pings defined in the host definition.  Any value
   # other than the number defined in the RRD format will cause the RRD update
@@ -408,12 +458,34 @@ sub pingone ($$){
   while (($length = @times) > 20) {
     pop @times;
   }
+  my $t_parse_end = time();
 
   # Debug
   if ( $debug ) {
     my $resp = Dumper \@times;
     my $length = @times;
     DEBUG("$debug_key: \@times result: length[$length]\n$resp\n");
+
+    if ( $router_summary ) {
+      DEBUG("$debug_key: router summary: $router_summary->{raw}");
+      if ( $router_summary->{received} != $length ) {
+        DEBUG(sprintf(
+          "%s: WARN parser drift: router received=%d but parser built %d samples",
+          $debug_key, $router_summary->{received}, $length,
+        ));
+      }
+    }
+
+    my $ms = sub { sprintf("%.0fms", ($_[1] - $_[0]) * 1000) };
+    DEBUG(sprintf(
+      "%s: cycle done: connect=%s command=%s parse=%s total=%s samples=%d",
+      $debug_key,
+      $ms->($t_conn_start,  $t_conn_end),
+      $ms->($t_cmd_start,   $t_cmd_end),
+      $ms->($t_parse_start, $t_parse_end),
+      $ms->($t_cycle_start, time()),
+      $length,
+    ));
   }
 
   return @times;
@@ -490,6 +562,10 @@ The (optional) routerospass option specifies the SSH login password.
 Required unless ssh_key_path is set, or ssh-agent / a default identity
 file (e.g. ~/.ssh/id_ed25519) is configured for the user running
 smokeping.  See the Authentication section in the notes.
+
+Note: when debug=true the value of routerospass is written to
+debug_logfile in plaintext as part of the Net::OpenSSH options dump.
+See the debug option for details and mitigation.
 DOC
       _example => 'password',
     },
@@ -697,7 +773,18 @@ DOC
     debug => {
       _doc => <<DOC,
 The (optional) debug option lets you configure probe or target specific
-debugging.
+debugging.  When enabled the log includes a cycle-start configuration
+snapshot, the composed ssh command, phase timings (connect/command/parse),
+and the RouterOS packet-loss summary cross-checked against the parsed
+samples.
+
+Security warning: with debug enabled the log also contains a
+Data::Dumper dump of the Net::OpenSSH options hash, which includes
+routerospass in plaintext when password auth is in use, and the full
+on-disk path of ssh_key_path when key auth is in use.  Ensure
+debug_logfile lives on a filesystem readable only by the smokeping user,
+and redact the file before sharing it externally (support tickets,
+public issue trackers, pastebins, etc.).
 DOC
       _default => 'false',
       _re => '\w+',
@@ -711,7 +798,13 @@ DOC
     },
     debug_logfile => {
       _doc => <<DOC,
-The (optional) debug_logfile option lets you specify the debug logifile
+The (optional) debug_logfile option lets you specify the debug logifile.
+
+With debug=true this file contains sensitive material including the
+target's routerospass (when password auth is used) and the on-disk path
+of ssh_key_path.  Treat it as secret: lock it down with filesystem
+permissions readable only by the smokeping user, and rotate/redact it
+before sharing externally.
 DOC
       _default => "/tmp/smokeping_debug.log",
       _example => "/tmp/my_debug.log or /tmp/smokeping_target1.log"

@@ -151,6 +151,20 @@ If smokeping runs in a container that already has `SSH_AUTH_SOCK` forwarded from
 sudo -u smokeping ssh smokeping@router.example.com
 ```
 
+### Debugging
+
+Setting `debug = true` on a target emits a richer log to `debug_logfile` (default `/tmp/smokeping_debug.log`). Each probe cycle produces:
+
+- A `cycle start` line with the effective config snapshot (host, dest, user, auth method, multiplex, timeouts, strict-host-key policy).
+- The full composed ssh command the probe will execute — copy-paste this as the smokeping user to reproduce connection failures manually.
+- The raw ping response from the router.
+- The RouterOS `sent=N received=N packet-loss=N%` footer, cross-checked against the parser's sample count. A `WARN parser drift` line fires if they disagree — signal to investigate the regex.
+- A `cycle done` line with wall-clock timings for the three phases (`connect`, `command`, `parse`) and the total.
+
+For even deeper diagnostics, also set `debug_ssh = true` — this enables `-vvv` on the underlying ssh client and `$Net::OpenSSH::debug = -1`, dumping the full ssh protocol trace to the same file.
+
+> ⚠️ **Debug logs contain secrets.** With `debug = true` the probe dumps its full Net::OpenSSH options hash to `debug_logfile`, including `routerospass` in plaintext (when password auth is in use) and the on-disk path of `ssh_key_path` (when key auth is in use). Only enable debug on targets where the log file is readable by trusted operators, and scrub or redact logs before sharing them externally (support tickets, public issue trackers, pastebins). If you've been running with debug on historically, consider rotating any historical `debug_logfile` files whose contents may have been exposed.
+
 ### Multiplexed SSH Connections
 
 There are some requirements for this feature to work.  OpenSSH requires that the directory and it's parents, where the Master Control Socket File is created, must be writable only by the current effective user or root, otherwise the connection will be aborted to avoid insecure operation.  By default ~/.libnet-openssh-perl is used.
