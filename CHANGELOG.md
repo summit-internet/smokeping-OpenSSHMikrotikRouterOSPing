@@ -85,3 +85,9 @@
   the on-disk path of ssh_key_path.  If you have previously run with
   debug=true, rotate or redact any historical debug_logfile files
   before sharing them externally.
+- Fixed latent regression from 1.4.5: Net::OpenSSH forbids master_opts
+  alongside external_master=1, so reusing an existing multiplex
+  control socket would fail with "Invalid or bad combination of
+  options ('master_opts')" once a socket persisted between probe
+  cycles.  master_opts is now dropped from %opts on the socket-reuse
+  path.  Fresh-master creation path is unchanged.

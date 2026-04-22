@@ -314,7 +314,10 @@ sub pingone ($$){
         DEBUG("$debug_key: Master Control Socket file: $master_control_socket_path_file exists... Using.\n");
       }
 
-      # Append options hash to use existing multiplex control socket
+      # Append options hash to use existing multiplex control socket.
+      # Net::OpenSSH forbids master_opts alongside external_master (no master
+      # is being spawned, so master-side flags are meaningless), so drop it.
+      delete $opts{'master_opts'};
       $opts{'external_master'} = 1;
       $opts{'ctl_path'} = $master_control_socket_path_file;
     } else {
