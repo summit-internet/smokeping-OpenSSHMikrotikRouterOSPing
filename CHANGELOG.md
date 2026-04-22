@@ -49,3 +49,17 @@
 - README documents the full MikroTik-side setup (ssh-keygen, scp, /user
   ssh-keys import) and shows all three auth modes in the target
   examples.
+### Version 1.4.7
+- Fixed two separate "Invalid or bad combination of options ..." errors
+  from Net::OpenSSH introduced by the 1.4.6 auth changes:
+  1. "(22, key_path, 60, 1, 0)" when routerospass was unset.  The %opts
+     hash was using the "key" => ($val ? $val : ()) idiom, which
+     flattens to a bare "key" (no value) when $val is falsy, producing
+     an odd-element list that pairs subsequent keys and values into the
+     wrong slots.  Replaced with ($val ? (key => $val) : ()) so the
+     whole pair is added or omitted atomically.
+  2. "(key_path)" when a target with ssh_key_path set inherited
+     routerospass from the probe-level default.  Net::OpenSSH refuses
+     key_path and password in the same call.  Now ssh_key_path takes
+     precedence over routerospass so targets can flip individual
+     entries to key auth without unsetting the probe-level default.

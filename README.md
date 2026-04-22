@@ -99,7 +99,7 @@ Multiplexing is the ability to send more than one signal over a single line or c
 The probe supports three ways to authenticate to each Mikrotik target, chosen per-target:
 
 1. **Password** — set `routerospass` (the legacy default).
-2. **SSH key file** — set `ssh_key_path` to the private key path. Leave `routerospass` unset.
+2. **SSH key file** — set `ssh_key_path` to the private key path. `ssh_key_path` takes precedence over any `routerospass` inherited from the probe-level default, so individual targets can flip to key auth without having to unset `routerospass` on the parent probe.
 3. **ssh-agent / default identity files** — leave both `routerospass` and `ssh_key_path` unset. Net::OpenSSH invokes the system ssh client which picks up `SSH_AUTH_SOCK`, `~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, etc. — handy for containerised smokeping deployments that mount an agent socket.
 
 If none of the three are configured the connection fails at runtime with a Net::OpenSSH authentication error in the smokeping log.
@@ -117,8 +117,8 @@ chown smokeping:smokeping /etc/smokeping/id_ed25519 /etc/smokeping/id_ed25519.pu
 chmod 0600 /etc/smokeping/id_ed25519
 chmod 0644 /etc/smokeping/id_ed25519.pub
 
-# 3. Copy the public key to the router (one-time; will need the router password)
-scp /etc/smokeping/id_ed25519.pub smokeping@router.example.com:id_ed25519.pub
+# 3. Copy the public key to the router (one-time; needs a user with enough permissions to write the file)
+scp /etc/smokeping/id_ed25519.pub admin@router.example.com:id_ed25519.pub
 ```
 
 Then on the MikroTik router, as the admin or a user with `write` policy:
@@ -129,9 +129,6 @@ Then on the MikroTik router, as the admin or a user with `write` policy:
 
 # 5. (Optional) Verify the key is registered
 /user ssh-keys print where user=smokeping
-
-# 6. (Optional) Remove the uploaded file now that it's imported
-/file remove id_ed25519.pub
 ```
 
 Finally verify end-to-end from the smokeping host, still as root or the smokeping user:

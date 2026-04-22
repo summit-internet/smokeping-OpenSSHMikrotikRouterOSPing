@@ -317,7 +317,7 @@ VARIABLES
         duration of the ssh session including the running ping command, so
         it must be larger than the ping command duration (roughly pings *
         1s + headroom). For short TCP handshake timeouts see
-        ssh_connect_timeout.
+        ssh_connect_timeout. This must be lower than 'step'.
 
         Example value: 60
 
@@ -354,10 +354,13 @@ NOTES
         legacy default.
 
     *   SSH key file: set ssh_key_path to the path of a private key file
-        readable by the user running smokeping. Leave routerospass unset.
-        Install the matching public key on the router with /user ssh-keys
-        import public-key-file=<file> user=<routerosuser>. The README has
-        a step-by-step walk-through.
+        readable by the user running smokeping. When ssh_key_path is set
+        it takes precedence over any routerospass inherited from the
+        probe-level default, so you can flip individual targets to key
+        auth without having to unset routerospass on the parent. Install
+        the matching public key on the router with /user ssh-keys import
+        public-key-file=<file> user=<routerosuser>. The README has a
+        step-by-step walk-through.
 
     *   ssh-agent or system default identity: leave both routerospass and
         ssh_key_path unset. Net::OpenSSH will invoke the system ssh client

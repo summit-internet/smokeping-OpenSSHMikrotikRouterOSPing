@@ -63,10 +63,12 @@ device.  Pick one per target.
 the legacy default.
 
 =item * SSH key file: set ssh_key_path to the path of a private key
-file readable by the user running smokeping.  Leave routerospass unset.
-Install the matching public key on the router with /user ssh-keys
-import public-key-file=<file> user=<routerosuser>.  The README has a
-step-by-step walk-through.
+file readable by the user running smokeping.  When ssh_key_path is set
+it takes precedence over any routerospass inherited from the probe-level
+default, so you can flip individual targets to key auth without having
+to unset routerospass on the parent.  Install the matching public key
+on the router with /user ssh-keys import public-key-file=<file>
+user=<routerosuser>.  The README has a step-by-step walk-through.
 
 =item * ssh-agent or system default identity: leave both routerospass
 and ssh_key_path unset.  Net::OpenSSH will invoke the system ssh client
@@ -204,16 +206,25 @@ sub pingone ($$){
     DEBUG("$debug_key: Debugging enabled...\n");
   }
 
-  # Define the base SSH connection options to pass to the Net::OpenSSH->new() connection method
+  # Define the base SSH connection options to pass to the Net::OpenSSH->new() connection method.
+  # Note the conditional-pair idiom: ($val ? (key => $val) : ()) either adds both key and
+  # value, or adds neither.  The older form "key" => ($val ? $val : ()) produces a bare
+  # "key" with no value when $val is falsy, which corrupts the hash (odd element count).
+  #
+  # Auth precedence: ssh_key_path wins over routerospass.  Net::OpenSSH refuses to accept
+  # both key_path and password in the same call ("Invalid or bad combination of options"),
+  # so when a target sets ssh_key_path we drop any password inherited from the probe-level
+  # routerospass default.  If neither is set, Net::OpenSSH falls through to ssh-agent /
+  # default identity files.
   my %opts = (
-    "user" => $login ? $login : (),
-    "password" => $password ? $password : (),
-    "key_path" => $ssh_key_path ? $ssh_key_path : (),
-    "port" => $port,
-    "timeout" => $ssh_timeout,
+    ($login        ? ("user"     => $login       ) : ()),
+    ($ssh_key_path ? ("key_path" => $ssh_key_path)
+                   : ($password ? ("password" => $password) : ())),
+    "port"                => $port,
+    "timeout"             => $ssh_timeout,
     "kill_ssh_on_timeout" => 1,
-    "strict_mode" => 0,
-    "ssh_cmd" => $ssh_cmd
+    "strict_mode"         => 0,
+    "ssh_cmd"             => $ssh_cmd,
   );
 
   # Base master_opts applied whether or not multiplexing is enabled.
